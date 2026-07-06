@@ -1,3 +1,3 @@
 #!/usr/bin/env bash
-# Post-tool-call hook — currently a no-op placeholder.
-exit 0
+# Delegates to post_tool_call.py (same directory).
+exec python3 "$(dirname "$0")/post_tool_call.py"

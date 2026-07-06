@@ -2,11 +2,14 @@
   "permissions": {
     "allow": [
       "Bash(uv:*)",
+      "Bash(python3:*)",
       "Bash(python:*)",
       "Bash(pytest:*)",
       "Bash(ruff:*)",
       "Bash(mypy:*)",
       "Bash(pre-commit:*)",
+      "Bash(detect-secrets:*)",
+      "Bash(npx:*)",
       "Bash(git status)",
       "Bash(git diff:*)",
       "Bash(git log:*)",
@@ -14,6 +17,8 @@
       "Bash(git commit:*)",
       "Bash(git branch:*)",
       "Bash(git checkout:*)",
+      "Bash(git tag:*)",
+      "Bash(git push --force-with-lease*)",
       "Bash(find:*)",
       "Bash(grep:*)",
       "Bash(ls:*)",
@@ -21,6 +26,7 @@
       "Bash(mkdir:*)",
       "Bash(cp:*)",
       "Bash(mv:*)",
+      "Bash(chmod:*)",
       "Read(*)",
       "Edit(*)",
       "Write(*)"
@@ -28,9 +34,10 @@
     "deny": [
       "Bash(curl * -d *password*)",
       "Bash(curl * -d *token*)",
-      "Bash(git push --force*)",
+      "Bash(git push --force[^-]*)",
       "Bash(rm -rf /*)",
-      "Bash(sudo:*)"
+      "Bash(sudo:*)",
+      "Bash(pip install*)"
     ]
   },
   "hooks": {
@@ -43,13 +50,48 @@
             "command": "bash .claude/hooks/pre-tool-call.sh"
           }
         ]
+      },
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/pre-tool-call.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/pre-tool-call.sh"
+          }
+        ]
+      }
+    ],
+    "PostToolCall": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/post-tool-call.sh"
+          }
+        ]
       }
     ]
   },
   "mcpServers": {
     "filesystem": {
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "."]
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "."],
+      "description": "Browse and read project files by path or glob"
+    },
+    "sequential-thinking": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"],
+      "description": "Structured step-by-step reasoning for complex tasks (HAC debugging, architecture decisions)"
     }
   }
 }

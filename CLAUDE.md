@@ -1,166 +1,424 @@
 # CLAUDE.md — hac-cli Development Guide
 
 This file is the authoritative guide for AI-assisted development on this project.
-Read it before making any changes.
+**Read it in full before making any changes.**
+
+---
 
 ## Project Overview
 
-**hac-cli** is a Python CLI tool that automates execution of HAC (Hybris Administration Console)
-Groovy scripts across SAP Commerce environments. It eliminates browser-based HAC usage for
-routine operations.
+**hac-cli** is a Python 3.11+ CLI/TUI tool that automates execution of HAC
+(Hybris Administration Console) Groovy scripts across SAP Commerce environments
+without opening a browser.
 
-**Key entry point:** `src/hac_cli/main.py` → `src/hac_cli/cli/app.py`
+**Entry point:** `src/hac_cli/main.py` → `cli/app.py`
+**Interactive TUI:** `tui/app.py` (Textual)
+
+---
+
+## Phase Completion Status
+
+| Phase | Status | Key deliverable |
+|---|---|---|
+| 1 — Architecture & Design | ✅ Done | Stack choice, layer map, security model |
+| 2 — Repository Bootstrap | ✅ Done | 51-file skeleton, domain models, ports, CI/CD |
+| 3 — HAC Auth & Execution | ✅ Done | `HacHttpClient` — login, CSRF, execute, re-auth |
+| 4 — CLI/TUI & Script Library | ✅ Done | Textual TUI, CLI tests, env-var testability |
+| 5 — Claude Configuration | ✅ Done | This file, hooks, MCP, docs |
+| 6 — Testing, Docs, Packaging | ⬜ Next | Integration tests, PyPI, release automation |
+
+---
 
 ## Architecture
 
 ```
 CLI (Typer)  →  Application (Use Cases)  →  Domain (Models + Ports)
-                                         ↑
-                          Infrastructure (Adapters) implements Ports
+TUI (Textual) →                           ←  Infrastructure (Adapters)
 ```
 
 ### Layer Rules
 
 | Layer | Location | Rule |
 |---|---|---|
-| CLI | `src/hac_cli/cli/` | Only Typer commands + Rich output. No business logic. |
-| Application | `src/hac_cli/application/` | Orchestrates domain + infrastructure via ports. No HTTP. |
-| Domain | `src/hac_cli/domain/` | Pure Python. Zero external imports. |
+| CLI | `src/hac_cli/cli/` | Typer commands + Rich output only. No business logic. |
+| Application | `src/hac_cli/application/` | Orchestrates ports. No HTTP. No OS I/O. |
+| Domain | `src/hac_cli/domain/` | Pure Python. Zero external imports. Frozen dataclasses. |
 | Infrastructure | `src/hac_cli/infrastructure/` | All external I/O. Implements domain ports. |
+| TUI | `src/hac_cli/tui/` | Textual App. Calls Application layer only. |
 
-**Never** import infrastructure directly from CLI. CLI → Application → Infrastructure (via ports).
+**Never** import infrastructure directly from CLI or TUI.
+**Never** import anything from `infrastructure` inside `domain`.
+
+---
 
 ## Security Rules — MANDATORY
 
-1. **No secrets on disk.** Passwords/tokens go to `KeyringSecretStore` only.
-2. **No secrets in logs.** All output passes through `utils/logging.redact()`.
-3. **No secrets in `.gitignore`-covered files.** The `detect-secrets` baseline enforces this.
-4. **SSL verify=True by default.** Only disable with explicit `--no-ssl-verify` flag.
-5. **Never commit** files matching: `*.env`, `*.key`, `secrets.*`, `config.local.*`, `cookies.txt`.
-6. **CSRF token handling** — always fetch fresh token before each execution; never cache it.
+1. **No secrets on disk.** Passwords/tokens → `KeyringSecretStore` only.
+2. **No secrets in logs.** All output through `utils/logging.redact()`.
+3. **SSL verify=True by default.** Only `--no-ssl-verify` overrides it (dev only).
+4. **CSRF tokens are never cached.** Fetch fresh on every execute call.
+5. **Never stage** `*.env`, `*.key`, `secrets.*`, `config.local.*`, `cookies.txt`.
+6. **Never use `print()`** in source. Use `utils/output.py` or the logger.
+7. **Never hardcode** environment URLs, usernames, or passwords in tests.
 
-If you see a secret pattern (password=, token=, Authorization:) in code you're about to write, stop and use the secret store instead.
+The `.claude/hooks/pre_tool_call.py` enforces rules 1 and 5 at tool-call time.
 
-## Development Workflows
+---
 
-### Adding a New Environment Command
-1. Add the command to `src/hac_cli/cli/cmd_env.py`
-2. If it needs new logic, add a method to `application/manage_environments.py`
-3. If it needs new infrastructure, add to `infrastructure/config_store.py` or `infrastructure/secret_store.py`
-4. Add unit tests in `tests/unit/`
+## HAC API Quick Reference
 
-### Adding a New Script to the Library
-1. Create `scripts/<category>/<name>.groovy`
-2. Add `// @meta ... // @end` frontmatter (see `scripts/_templates/script.groovy.template`)
-3. Test with `hac scripts show <category>/<name>`
+| Step | Method | URL | Notes |
+|---|---|---|---|
+| Login page | GET | `/login` | Extract `<input name="_csrf">` |
+| Authenticate | POST | `/j_spring_security_check` | `j_username`, `j_password`, `_csrf`; `follow_redirects=False` |
+| CSRF for scripts | GET | `/console/scripting/api/` | Extract `<meta name="_csrf" content="...">` |
+| Execute Groovy | POST | `/console/scripting/api/execute` | Form body: `script`, `commit`; Header: `X-CSRF-TOKEN` |
+| FlexibleSearch | POST | `/console/flexiblesearch/api/execute` | Same auth pattern |
+| ImpEx import | POST | `/console/impex/import` | Multipart or form body |
 
-### Adding a New CLI Subcommand Group
-1. Create `src/hac_cli/cli/cmd_<name>.py` with `<name>_app = typer.Typer(...)`
-2. Register in `src/hac_cli/cli/app.py` via `app.add_typer(...)`
-3. Add use case in `application/`
+**Response format for Groovy execution:**
+```json
+{
+  "executionResult": "output or stacktrace",
+  "stacktraceOccurred": false,
+  "outputText": "stdout output (newer SAP Commerce versions)"
+}
+```
 
-### HAC Client Changes (Phase 3+)
-The `HacHttpClient` in `infrastructure/hac_client.py` implements `IHacClient`.
-Auth flow: login → get CSRF → execute → parse response.
-Never cache CSRF tokens across sessions.
+Login success = 302 to `/` or app root.
+Login failure = 302 to `/login?error=true`.
+Session expired = CSRF-page GET redirects to `/login`.
 
-## Coding Standards
-
-### Python
-- Python 3.11+ — use `match`, `tomllib`, `datetime.UTC`, `X | Y` union types
-- Type hints on all public functions — `mypy --strict` must pass
-- `ruff` for linting and formatting (replaces black + isort + flake8)
-- Dataclasses or Pydantic for models — no raw dicts passed between layers
-- `from __future__ import annotations` in all files
-- No comments on obvious code. Comments only for non-obvious WHY.
-
-### Groovy Scripts
-- Always use `binding.hasVariable("param")` guard before accessing script params
-- Get Spring beans via `Registry.getApplicationContext().getBean(...)`
-- Always print clear output — HAC returns stdout as the result
-- Handle nulls explicitly — SAP Commerce objects are often nullable
-
-### Testing
-- Unit tests: `tests/unit/` — mock all I/O via pytest fixtures
-- Integration tests: `tests/integration/` — require `HAC_TEST_URL` env var, skipped in CI unless set
-- Coverage threshold: 80% for unit tests
-- Use `pytest-httpx` for mocking httpx in client tests
-
-## Common Prompts for Claude
-
-### "Add FlexibleSearch support"
-Create `src/hac_cli/cli/cmd_flexsearch.py`, `application/execute_flexsearch.py`.
-Reuse `IHacClient` — FlexibleSearch has its own HAC endpoint: `/console/flexiblesearch/api/execute`.
-Follow the same pattern as `cmd_groovy.py`.
-
-### "Add ImpEx import support"
-HAC ImpEx endpoint: `POST /console/impex/import`. Add `IHacImpExClient` port.
-Implement in `infrastructure/hac_impex_client.py`.
-
-### "Add parallel execution"
-`ExecuteGroovyService.execute_many(envs, script)` → `asyncio.gather(...)`.
-Add `--env` as multi-value option: `--env dev --env staging`.
-
-### "Add NLP/Claude API script selection"
-Replace fuzzy search in `nlp_selector.py` with `anthropic.Anthropic().messages.create(...)`.
-Use model `claude-haiku-4-5-20251001` for speed. Prompt: classify query to script name.
-
-### "Publish to PyPI"
-Update version in `pyproject.toml`, update `CHANGELOG.md`, tag `v{version}`, push tag.
-GitHub Actions `release.yml` handles the rest.
+---
 
 ## File Map
 
 ```
 src/hac_cli/
-  main.py                  # Entry point
-  cli/app.py               # Root Typer app + subcommand registration
-  cli/cmd_env.py           # hac env *
-  cli/cmd_groovy.py        # hac groovy *
-  cli/cmd_scripts.py       # hac scripts *
+  main.py                    Entry point
+  cli/
+    app.py                   Root Typer app + subcommand registration
+    cmd_env.py               hac env add/list/remove/test
+    cmd_groovy.py            hac groovy run/exec
+    cmd_scripts.py           hac scripts list/search/show
   application/
-    manage_environments.py # EnvironmentService
-    execute_groovy.py      # ExecuteGroovyService
+    execute_groovy.py        ExecuteGroovyService — resolves script, calls client
+    manage_environments.py   EnvironmentService — CRUD + credential delegation
   domain/
-    models.py              # Environment, ExecutionContext, ExecutionResult, ScriptMeta
-    ports.py               # IHacClient, ISecretStore, IConfigStore, IScriptRepository
-    exceptions.py          # All domain exceptions
+    models.py                Environment, ExecutionContext, ExecutionResult, ScriptMeta
+    ports.py                 IHacClient, ISecretStore, IConfigStore, IScriptRepository
+    exceptions.py            6 typed exceptions (all extend HacCliError)
   infrastructure/
-    hac_client.py          # HAC HTTP (Phase 3)
-    secret_store.py        # OS keychain via keyring
-    config_store.py        # ~/.hac-cli/config.toml
-    script_repository.py   # Filesystem script library + fuzzy search
-  tui/app.py               # Textual TUI (Phase 4)
+    hac_client.py            HacHttpClient — auth + CSRF + execute + session cache
+    secret_store.py          KeyringSecretStore — OS keychain
+    config_store.py          TomlConfigStore — ~/.hac-cli/config.toml
+    script_repository.py     FilesystemScriptRepository — glob + frontmatter + fuzzy search
+  tui/
+    app.py                   HacApp (Textual) — script browser + env switcher + output log
+    widgets.py               ScriptInfoBar, OutputPanel helpers
   utils/
-    logging.py             # Secret-redacting logger
-    output.py              # Rich console helpers
+    logging.py               RedactingFilter + get_logger()
+    output.py                Rich console helpers (print_success/error/warning/info)
 
-scripts/                   # Groovy script library
-  cache/                   # Cache management
-  catalog/                 # Catalog operations
-  customer/                # Customer queries
-  orders/                  # Order management
-  _templates/              # Script authoring template
+scripts/                     Groovy script library (categorised)
+  cache/                     clear_all_caches, clear_region
+  catalog/                   get_catalog_versions, sync_catalog
+  customer/                  find_customer
+  orders/                    get_order_status
+  _templates/                script.groovy.template
 
 tests/
-  unit/                    # Fast, no I/O, no HAC
-  integration/             # Requires live HAC (opt-in)
-  conftest.py              # Shared fixtures
+  unit/                      Fast, no I/O — 65 tests, 91% coverage
+    test_config_store.py
+    test_hac_client.py       34 tests with pytest-httpx mocking
+    test_execute_groovy.py   11 tests with MagicMock/AsyncMock
+    test_cli_scripts.py      8 tests via Typer CliRunner + HAC_SCRIPTS_PATH
+    test_script_library.py
+  integration/               Opt-in, requires HAC_TEST_URL
+  conftest.py                Shared fixtures: dev_env, simple_groovy
+
+docs/
+  architecture.md            Layer diagrams, auth flow, extension points
+  getting-started.md         Installation, configuration, common workflows
+  security.md                Credential storage, secret scanning, transport security
+  script-authoring.md        Frontmatter format, Spring beans, Groovy patterns
 ```
+
+---
 
 ## Environment Variables
 
-| Variable | Purpose |
-|---|---|
-| `HAC_CONFIG_PATH` | Override `~/.hac-cli/config.toml` path |
-| `HAC_TEST_URL` | Enable integration tests against a live HAC |
-| `HAC_LOG_LEVEL` | Log level: DEBUG, INFO, WARNING (default: WARNING) |
+| Variable | Default | Purpose |
+|---|---|---|
+| `HAC_CONFIG_PATH` | `~/.hac-cli` | Override config directory (evaluated at instantiation) |
+| `HAC_SCRIPTS_PATH` | `<repo>/scripts` | Override script library root (evaluated at instantiation) |
+| `HAC_LOG_LEVEL` | `WARNING` | Log level: DEBUG, INFO, WARNING |
+| `HAC_TEST_URL` | (unset) | Live HAC URL — activates integration tests |
+
+---
+
+## Development Workflows
+
+### Add a new Groovy script to the library
+1. Create `scripts/<category>/<name>.groovy`
+2. Add `// @meta … // @end` frontmatter (copy `scripts/_templates/script.groovy.template`)
+3. Test: `hac scripts show <category>/<name>`
+4. Dry-run: `hac groovy run --env dev --script <category>/<name>`
+
+### Add a new CLI subcommand group
+1. Create `src/hac_cli/cli/cmd_<name>.py` with `<name>_app = typer.Typer(...)`
+2. Register in `cli/app.py` via `app.add_typer(<name>_app, name="<name>", help="...")`
+3. Add use case in `application/<name>.py`
+4. Add unit tests in `tests/unit/test_cli_<name>.py` using `CliRunner` + env var injection
+
+### Add a new environment config field
+1. Add field to `domain/models.py` `Environment` dataclass (with default)
+2. Serialize/deserialize in `infrastructure/config_store.py` `_dict_to_env` and `save_environment`
+3. Expose via `hac env add --new-flag` in `cli/cmd_env.py`
+
+### Add a TUI widget or screen
+1. Add Textual widget to `tui/widgets.py` or a new `tui/<screen>.py`
+2. Import and compose in `tui/app.py`
+3. Add reactive property if the widget responds to app state
+4. Wire keyboard binding in `BINDINGS` list
+
+### Run tests
+```bash
+uv run pytest tests/unit/ -v                    # unit tests + coverage
+uv run pytest tests/unit/ -v --no-cov           # fast, no coverage overhead
+uv run pytest tests/unit/test_hac_client.py -v  # single file
+HAC_TEST_URL=https://dev-hac.example.com uv run pytest tests/integration/  # integration
+```
+
+### Check code quality
+```bash
+uv run ruff check src/ tests/    # lint
+uv run ruff format src/ tests/   # format
+uv run mypy src/                 # type check
+```
+
+---
+
+## Testing Patterns
+
+### Mocking HAC HTTP with pytest-httpx
+
+```python
+from pytest_httpx import HTTPXMock
+from hac_cli.infrastructure.hac_client import HacHttpClient
+
+@pytest.mark.asyncio
+async def test_execute_success(httpx_mock: HTTPXMock, env):
+    # Register mocks in call order
+    httpx_mock.add_response(method="GET",  url=env.login_page_url, text=LOGIN_HTML)
+    httpx_mock.add_response(method="POST", url=env.login_url,
+                            status_code=302, headers={"location": env.hac_base_url + "/"})
+    httpx_mock.add_response(method="GET",  url=env.scripting_url, text=SCRIPTING_HTML)
+    httpx_mock.add_response(method="POST", url=env.execute_url,
+                            json={"executionResult": "ok", "stacktraceOccurred": False})
+
+    client = HacHttpClient(secret_store=mock_store)
+    result = await client.execute(ctx)
+    assert result.succeeded
+```
+
+HTML snippets to re-use:
+```python
+LOGIN_HTML    = '<input type="hidden" name="_csrf" value="tok"/>'
+SCRIPTING_HTML = '<meta name="_csrf" content="tok"/>'
+```
+
+### Injecting a pre-existing session (skip re-auth)
+
+```python
+from hac_cli.infrastructure.hac_client import _CachedSession
+client._sessions["dev"] = _CachedSession(cookies={"JSESSIONID": "abc123"})
+# Now only CSRF fetch + execute are needed
+```
+
+### CLI tests with env var injection
+
+```python
+from typer.testing import CliRunner
+from hac_cli.cli.app import build_app
+
+runner = CliRunner()
+app    = build_app()
+
+def test_scripts_list(tmp_path):
+    result = runner.invoke(app, ["scripts", "list"],
+                           env={"HAC_SCRIPTS_PATH": str(tmp_path),
+                                "HAC_CONFIG_PATH":  str(tmp_path)})
+    assert result.exit_code == 0
+```
+
+### Mocking the application layer with AsyncMock
+
+```python
+from unittest.mock import AsyncMock, MagicMock
+from hac_cli.domain.ports import IHacClient
+
+mock_client = MagicMock(spec=IHacClient)
+mock_client.execute = AsyncMock(return_value=ExecutionResult(
+    status=ExecutionStatus.SUCCESS, output="ok", execution_time_ms=42
+))
+```
+
+---
+
+## Common Claude Prompts
+
+### "Add FlexibleSearch command"
+```
+Create src/hac_cli/cli/cmd_flexsearch.py with Typer commands:
+  hac fs query --env dev --query "SELECT {pk} FROM {Product}"
+  hac fs query --env dev --file my_query.fxs
+
+HAC FlexibleSearch endpoint:
+  POST /console/flexiblesearch/api/execute
+  Body (form): flexibleSearchQuery=<query>, maxCount=200, itemsPerPage=20
+  Response: { "query": {...}, "exception": null, "resultList": [...] }
+
+Reuse HacHttpClient — add execute_flexsearch() method that:
+1. Calls _ensure_authenticated() + _fetch_csrf_token() (same as Groovy)
+2. POSTs to /console/flexiblesearch/api/execute
+3. Returns a FlexSearchResult model with headers + rows
+
+Add application/execute_flexsearch.py FlexSearchService following the same
+pattern as execute_groovy.py. Register in cli/app.py.
+```
+
+### "Add ImpEx import command"
+```
+Create src/hac_cli/cli/cmd_impex.py:
+  hac impex import --env dev --file data.impex
+  hac impex import --env dev --inline "INSERT_UPDATE Product;code[unique=true];name"
+
+HAC ImpEx endpoint:
+  POST /console/impex/import
+  Body (form): scriptContent=<impex>, validationEnum=IMPORT_STRICT,
+               maxThreads=1, encoding=UTF-8, _legacyMode=false
+  Response: HTML page — check for "Import finished" vs error div
+
+Add ImpexResult domain model. Parse the HTML response for
+success/error indicators (BeautifulSoup).
+```
+
+### "Add parallel execution across environments"
+```
+Add to ExecuteGroovyService:
+  async def execute_many(self, env_names: list[str], ...) -> list[ExecutionResult]:
+      tasks = [self.execute(env_name=e, ...) for e in env_names]
+      return await asyncio.gather(*tasks, return_exceptions=True)
+
+Update cmd_groovy.py run command:
+  --env can be specified multiple times:
+  @groovy_app.command()
+  def run(env: list[str] = typer.Option(..., "--env", "-e"), ...)
+
+Display results in a Rich Table with per-env status column.
+```
+
+### "Add Claude API NLP script selection"
+```
+In application/execute_groovy.py, update find_scripts_by_nlp():
+  from anthropic import Anthropic
+  client = Anthropic()
+  scripts = self._scripts.list_scripts()
+  script_list = "\n".join(f"{s.path}: {s.description}" for s in scripts)
+  msg = client.messages.create(
+      model="claude-haiku-4-5-20251001",
+      max_tokens=100,
+      messages=[{"role": "user", "content":
+          f"From this list:\n{script_list}\n\n"
+          f"Which script best matches: '{query}'?\n"
+          "Reply with just the path, e.g. cache/clear_all_caches"}],
+  )
+  path = msg.content[0].text.strip()
+  return [s for s in scripts if s.path == path]
+
+Add anthropic>=0.30 to pyproject.toml dependencies.
+```
+
+### "Add integration test for hac groovy run"
+```
+In tests/integration/test_hac_groovy.py:
+  import pytest, os
+  pytestmark = pytest.mark.skipif(
+      not os.getenv("HAC_TEST_URL"), reason="HAC_TEST_URL not set"
+  )
+
+  @pytest.mark.asyncio
+  async def test_execute_inline_on_live_hac(hac_env):
+      # hac_env fixture from conftest: reads HAC_TEST_URL + HAC_TEST_USER
+      client = HacHttpClient(secret_store=EnvSecretStore())
+      ctx = ExecutionContext(environment=hac_env, script_content='println "ping"')
+      result = await client.execute(ctx)
+      assert result.succeeded
+      assert "ping" in result.output
+```
+
+### "Release a new version"
+```
+1. Update version in pyproject.toml: version = "X.Y.Z"
+2. Update CHANGELOG.md — move Unreleased → [X.Y.Z] with today's date
+3. Run: uv run pytest tests/unit/ && uv run ruff check src/
+4. git add pyproject.toml CHANGELOG.md && git commit -m "chore: release vX.Y.Z"
+5. git tag vX.Y.Z && git push && git push --tags
+6. GitHub Actions release.yml handles PyPI publish + GitHub Release automatically
+```
+
+### "Debug a HAC authentication failure"
+```
+Enable debug logging:
+  HAC_LOG_LEVEL=DEBUG hac env test dev 2>&1 | head -50
+
+Check that:
+1. URL is reachable: curl -v https://your-hac/login
+2. Login redirect location does NOT contain "error"
+3. Scripting page responds with 200 and contains <meta name="_csrf">
+
+To dump raw HTTP: add httpx event hooks temporarily to HacHttpClient._make_client():
+  event_hooks={"request": [lambda r: print(r.url)],
+               "response": [lambda r: print(r.status_code, r.url)]}
+```
+
+---
+
+## Coding Standards
+
+### Python
+- Python 3.11+ syntax: `match`, `tomllib`, `X | Y` unions, `datetime.now(timezone.utc)`
+- `from __future__ import annotations` in every source file
+- Type hints on all public functions; `mypy --strict` must pass
+- `ruff` for linting and formatting — no separate black/isort/flake8
+- Frozen dataclasses for value objects; unfrozen for mutable results
+- No comments on obvious code — only non-obvious WHY
+- No `# type: ignore` without an explanatory comment
+
+### Groovy scripts
+- `binding.hasVariable("param")` guard on every parameter
+- Beans via `Registry.getApplicationContext().getBean(Type.class)` (type-safe)
+- Always `println` a meaningful result — HAC returns stdout as the output
+- Null-safe navigation: `order?.user?.uid ?: "(unknown)"`
+
+### Tests
+- `tests/unit/` — fast, no external I/O; all HTTP mocked via `pytest-httpx`
+- `tests/integration/` — opt-in, gate with `pytestmark = pytest.mark.skipif(not os.getenv("HAC_TEST_URL")...)`
+- Coverage ≥ 80% on domain + infrastructure layers (CLI/TUI excluded from threshold)
+- Fixtures in `conftest.py` — no hardcoded URLs or credentials anywhere in test files
+
+---
 
 ## What NOT to do
 
-- Don't store credentials in config files — use `KeyringSecretStore`
-- Don't bypass SSL verification in non-dev environments
-- Don't add `print()` statements — use `utils/output.py` helpers or the logger
-- Don't import from `infrastructure` in `domain` — direction is domain → infrastructure via ports
-- Don't hardcode environment URLs or usernames in tests — use fixtures from `conftest.py`
-- Don't add `# type: ignore` without a comment explaining why
+| Don't | Do instead |
+|---|---|
+| Store credentials in config file | `KeyringSecretStore.set_password()` |
+| `print()` in source | `utils/output.print_*()` or logger |
+| Import infrastructure in domain | Use ports (abstract base classes) |
+| Hardcode env URLs/passwords in tests | Use `conftest.py` fixtures + env vars |
+| Add `# type: ignore` silently | Comment explaining the unavoidable reason |
+| Bypass SSL in non-dev envs | Keep `verify_ssl=True`; fix the cert instead |
+| Cache CSRF tokens | Fetch fresh on every execute call |
+| Add `uv run pip install` | Add to `pyproject.toml` and run `uv sync` |

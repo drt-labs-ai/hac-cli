@@ -20,8 +20,10 @@ class Environment:
     name: str
     url: str
     username: str
+    password: Optional[str] = None
     timeout: int = 30
     verify_ssl: bool = True
+    safe_mode: bool = True
 
     @property
     def hac_base_url(self) -> str:
@@ -33,7 +35,7 @@ class Environment:
 
     @property
     def scripting_url(self) -> str:
-        return f"{self.hac_base_url}/console/scripting/api/"
+        return f"{self.hac_base_url}/console/scripting/"
 
     @property
     def login_page_url(self) -> str:
@@ -41,7 +43,7 @@ class Environment:
 
     @property
     def execute_url(self) -> str:
-        return f"{self.hac_base_url}/console/scripting/api/execute"
+        return f"{self.hac_base_url}/console/scripting/execute"
 
 
 @dataclass(frozen=True)

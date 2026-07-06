@@ -9,7 +9,11 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from hac_cli.application.execute_groovy import ExecuteGroovyService
-from hac_cli.domain.exceptions import EnvironmentNotFoundError, MissingCredentialsError
+from hac_cli.domain.exceptions import (
+    CommitBlockedBySafeModeError,
+    EnvironmentNotFoundError,
+    MissingCredentialsError,
+)
 from hac_cli.domain.models import (
     Environment,
     ExecutionContext,
@@ -17,7 +21,7 @@ from hac_cli.domain.models import (
     ExecutionStatus,
     ScriptMeta,
 )
-from hac_cli.domain.ports import IConfigStore, IHacClient, IScriptRepository, ISecretStore
+from hac_cli.domain.ports import IConfigStore, IHacClient, IScriptRepository
 
 
 # ---------------------------------------------------------------------------
@@ -40,20 +44,6 @@ class _MockConfigStore(IConfigStore):
 
     def delete_environment(self, name: str) -> None:
         self._envs.pop(name, None)
-
-
-class _MockSecretStore(ISecretStore):
-    def __init__(self, passwords: dict[str, str] | None = None) -> None:
-        self._passwords = passwords or {}
-
-    def get_password(self, env_name: str) -> Optional[str]:
-        return self._passwords.get(env_name)
-
-    def set_password(self, env_name: str, password: str) -> None:
-        self._passwords[env_name] = password
-
-    def delete_password(self, env_name: str) -> None:
-        self._passwords.pop(env_name, None)
 
 
 class _MockScriptRepo(IScriptRepository):
@@ -82,17 +72,14 @@ def _make_success_result() -> ExecutionResult:
 
 def _make_service(
     env: Environment | None = None,
-    password: str | None = "secret",
     hac_client: IHacClient | None = None,
     scripts: dict[str, str] | None = None,
 ) -> ExecuteGroovyService:
     envs = {env.name: env} if env else {}
-    passwords = {env.name: password} if env and password else {}
     mock_client = hac_client or _make_mock_client()
     return ExecuteGroovyService(
         hac_client=mock_client,
         config_store=_MockConfigStore(envs),
-        secret_store=_MockSecretStore(passwords),
         script_repo=_MockScriptRepo(scripts),
     )
 
@@ -106,7 +93,7 @@ def _make_mock_client(result: ExecutionResult | None = None) -> IHacClient:
 @pytest.fixture
 def dev_env() -> Environment:
     return Environment(
-        name="dev", url="https://dev.example.com", username="admin"
+        name="dev", url="https://dev.example.com", username="admin", password="secret"
     )
 
 
@@ -139,14 +126,37 @@ class TestExecuteGroovyService:
         assert ctx.commit is False
 
     @pytest.mark.asyncio
-    async def test_execute_passes_commit_flag(self, dev_env: Environment):
+    async def test_execute_passes_commit_flag_when_safe_mode_disabled(self):
+        env = Environment(
+            name="dev", url="https://dev.example.com", username="admin",
+            password="secret", safe_mode=False,
+        )
         mock_client = _make_mock_client()
-        svc = _make_service(env=dev_env, hac_client=mock_client)
+        svc = _make_service(env=env, hac_client=mock_client)
 
         await svc.execute(env_name="dev", inline_code='println "x"', commit=True)
 
         ctx: ExecutionContext = mock_client.execute.call_args[0][0]
         assert ctx.commit is True
+
+    @pytest.mark.asyncio
+    async def test_execute_raises_when_commit_on_safe_mode_env(self, dev_env: Environment):
+        svc = _make_service(env=dev_env)
+
+        with pytest.raises(CommitBlockedBySafeModeError) as exc_info:
+            await svc.execute(env_name="dev", inline_code='println "x"', commit=True)
+
+        assert "dev" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_execute_allows_commit_false_on_safe_mode_env(self, dev_env: Environment):
+        mock_client = _make_mock_client()
+        svc = _make_service(env=dev_env, hac_client=mock_client)
+
+        await svc.execute(env_name="dev", inline_code='println "x"', commit=False)
+
+        ctx: ExecutionContext = mock_client.execute.call_args[0][0]
+        assert ctx.commit is False
 
     @pytest.mark.asyncio
     async def test_execute_from_file_path(self, dev_env: Environment, tmp_path: Path):
@@ -184,8 +194,11 @@ class TestExecuteGroovyService:
         assert "nonexistent" in str(exc_info.value)
 
     @pytest.mark.asyncio
-    async def test_execute_raises_when_no_password(self, dev_env: Environment):
-        svc = _make_service(env=dev_env, password=None)
+    async def test_execute_raises_when_no_password(self):
+        env_no_pass = Environment(
+            name="dev", url="https://dev.example.com", username="admin", password=None
+        )
+        svc = _make_service(env=env_no_pass)
 
         with pytest.raises(MissingCredentialsError) as exc_info:
             await svc.execute(env_name="dev", inline_code='println "x"')
@@ -221,7 +234,6 @@ class TestFindScriptsByNlp:
         svc = ExecuteGroovyService(
             hac_client=MagicMock(),
             config_store=_MockConfigStore(),
-            secret_store=_MockSecretStore(),
             script_repo=repo,
         )
 
@@ -236,7 +248,6 @@ class TestFindScriptsByNlp:
         svc = ExecuteGroovyService(
             hac_client=MagicMock(),
             config_store=_MockConfigStore(),
-            secret_store=_MockSecretStore(),
             script_repo=repo,
         )
 

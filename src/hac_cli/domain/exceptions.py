@@ -44,3 +44,12 @@ class MissingCredentialsError(HacCliError):
             f"Run: hac env add --name {env_name}"
         )
         self.env_name = env_name
+
+
+class CommitBlockedBySafeModeError(HacCliError):
+    def __init__(self, env_name: str) -> None:
+        super().__init__(
+            f"Environment '{env_name}' is in safe mode — commit=True is blocked. "
+            f"To allow commits, run: hac env add --name {env_name} ... --no-safe-mode"
+        )
+        self.env_name = env_name

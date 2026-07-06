@@ -15,7 +15,6 @@ from hac_cli.domain.exceptions import (
     ScriptExecutionError,
 )
 from hac_cli.domain.models import Environment, ExecutionContext, ExecutionResult, ExecutionStatus
-from hac_cli.domain.ports import ISecretStore
 from hac_cli.infrastructure.hac_client import HacHttpClient, _CachedSession
 
 # ---------------------------------------------------------------------------
@@ -63,20 +62,6 @@ _ERROR_PAYLOAD_NO_OUTPUTTEXT = {
 # ---------------------------------------------------------------------------
 
 
-class _MockSecretStore(ISecretStore):
-    def __init__(self, password: Optional[str] = "test_password") -> None:
-        self._password = password
-
-    def get_password(self, env_name: str) -> Optional[str]:
-        return self._password
-
-    def set_password(self, env_name: str, password: str) -> None:
-        pass
-
-    def delete_password(self, env_name: str) -> None:
-        pass
-
-
 def _mock_full_auth_flow(
     httpx_mock: HTTPXMock,
     env: Environment,
@@ -105,6 +90,7 @@ def env() -> Environment:
         name="dev",
         url="https://dev-hac.example.com",
         username="admin",
+        password="test_password",
         timeout=5,
         verify_ssl=False,
     )
@@ -112,7 +98,7 @@ def env() -> Environment:
 
 @pytest.fixture
 def client() -> HacHttpClient:
-    return HacHttpClient(secret_store=_MockSecretStore())
+    return HacHttpClient()
 
 
 @pytest.fixture
@@ -388,12 +374,15 @@ async def test_execute_timeout_returns_timeout_status(
 
 
 @pytest.mark.asyncio
-async def test_execute_raises_when_no_password(env: Environment):
-    client_no_pass = HacHttpClient(secret_store=_MockSecretStore(password=None))
-    ctx = ExecutionContext(environment=env, script_content='println "x"')
+async def test_execute_raises_when_no_password():
+    env_no_pass = Environment(
+        name="dev", url="https://dev-hac.example.com", username="admin",
+        password=None, timeout=5, verify_ssl=False,
+    )
+    ctx = ExecutionContext(environment=env_no_pass, script_content='println "x"')
 
     with pytest.raises(MissingCredentialsError):
-        await client_no_pass.execute(ctx)
+        await HacHttpClient().execute(ctx)
 
 
 @pytest.mark.asyncio
@@ -486,9 +475,12 @@ async def test_test_connection_returns_false_on_bad_credentials(
 
 
 @pytest.mark.asyncio
-async def test_test_connection_returns_false_on_no_password(env: Environment):
-    client_no_pass = HacHttpClient(secret_store=_MockSecretStore(password=None))
-    assert await client_no_pass.test_connection(env) is False
+async def test_test_connection_returns_false_on_no_password():
+    env_no_pass = Environment(
+        name="dev", url="https://dev-hac.example.com", username="admin",
+        password=None, timeout=5, verify_ssl=False,
+    )
+    assert await HacHttpClient().test_connection(env_no_pass) is False
 
 
 @pytest.mark.asyncio

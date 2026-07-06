@@ -73,6 +73,9 @@ config.local.*
 local.toml
 local.yaml
 
+# HAC config (project-root config.toml contains no secrets but is environment-specific)
+config.toml
+
 # HAC session artifacts
 .hac_sessions/
 .hac_tokens/

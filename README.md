@@ -11,7 +11,8 @@
 ## Features
 
 - **Multi-environment** — store configs for dev, staging, prod; switch with `--env`
-- **Secure credentials** — passwords in OS keychain (macOS Keychain / Windows Credential Manager), never on disk or in logs
+- **Simple credentials** — passwords stored in `config.toml` at the project root (gitignored)
+- **Safe mode** — `commit=True` blocked by default on all environments; opt-out per env with `--no-safe-mode`
 - **Script library** — parameterized, categorized Groovy snippets with fuzzy search
 - **Natural language** — `hac groovy run --env dev "clear all caches"` finds the right script
 - **Rich output** — colored results, execution timing, stack traces
@@ -32,8 +33,8 @@ uv tool install hac-cli
 ## Quick Start
 
 ```bash
-# 1. Add an environment (password stored securely in OS keychain)
-hac env add --name dev --url https://dev-hac.example.com --user admin
+# 1. Add an environment (password saved in config.toml)
+hac env add --name dev --url https://dev-hac.example.com --user admin --password yourpassword
 
 # 2. Test connectivity
 hac env test dev
@@ -48,7 +49,7 @@ hac groovy run --env dev --file my_script.groovy
 hac groovy run --env dev --inline 'println flexibleSearchService.search("SELECT {pk} FROM {Product}", [:]).count'
 
 # 6. Natural language script selection
-hac groovy run --env dev "clear all caches"
+hac groovy exec --env dev "clear all caches"
 
 # 7. Browse script library
 hac scripts list
@@ -65,12 +66,12 @@ Launch `hac` with no arguments for the keyboard-driven TUI:
 
 | Key        | Action                          |
 |------------|---------------------------------|
-| `Tab`      | Cycle between panels            |
-| `Ctrl+R`   | Run selected script             |
+| `↑↓`       | Navigate scripts                |
+| `F5`       | Execute selected script         |
 | `Ctrl+T`   | Toggle commit / dry-run mode    |
 | `/`        | Focus script search             |
 | `Escape`   | Clear search                    |
-| `Ctrl+N`   | Switch to next environment      |
+| `e`        | Switch to next environment      |
 | `q`        | Quit                            |
 
 ## Script Library
@@ -93,26 +94,27 @@ See [docs/script-authoring.md](docs/script-authoring.md) for full authoring guid
 
 ## Configuration
 
-Non-secret configuration is stored at `~/.hac-cli/config.toml`:
+All configuration including passwords is stored in `config.toml` at the project root:
 
 ```toml
 [environments.dev]
-url      = "https://dev-hac.example.com"
-username = "admin"
-timeout  = 30
+url        = "https://dev-hac.example.com"
+username   = "admin"
+password   = "yourpassword"
+timeout    = 30
 verify_ssl = true
 ```
 
-Passwords are stored in the OS keychain — never in this file.
+`config.toml` is gitignored and never committed.
 
 ## Security
 
-- Credentials stored in OS keychain (macOS Keychain / Windows Credential Manager / libsecret)
+- Passwords stored in `config.toml` (project root, gitignored — never committed)
+- **Safe mode on by default** — `--commit` blocked unless the environment explicitly opts out
 - All log output passes through a secret-redaction filter before display
 - SSL verification enabled by default; only `--no-ssl-verify` overrides it (dev only)
 - CSRF tokens fetched fresh on every execution — never cached
 - Pre-commit hooks scan for secrets before every commit
-- `detect-secrets` baseline enforced in CI
 
 See [SECURITY.md](SECURITY.md) for the full security model and vulnerability reporting.
 
@@ -123,7 +125,7 @@ Clean architecture with ports/adapters pattern:
 ```
 CLI (Typer) → Application (use-cases) → Domain (models, ports)
                                               ↑
-                              Infrastructure (HAC HTTP client, keyring, config)
+                              Infrastructure (HAC HTTP client, config, script repo)
 ```
 
 See [docs/architecture.md](docs/architecture.md) for the full diagram and HAC auth flow.

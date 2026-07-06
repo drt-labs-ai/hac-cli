@@ -29,8 +29,6 @@ dependencies = [
     "textual>=0.70",
     "keyring>=25",
     "tomli-w>=1.0",
-    "pydantic>=2",
-    "pydantic-settings>=2",
     "thefuzz>=0.22",
     "python-Levenshtein>=0.25",
     "beautifulsoup4>=4.12",
@@ -98,7 +96,7 @@ omit = [
     "*/cli/*",             # CLI commands require Typer runner — tested via integration
     "*/application/*",     # Application layer tested via integration tests
     "*/utils/output.py",   # Rich output helper — no logic to unit test
-    "*/secret_store.py",   # Requires OS keychain — integration-tested only
+    "*/secret_store.py",   # KeyringSecretStore — unused in main flow, no unit tests
 ]
 
 [tool.coverage.report]

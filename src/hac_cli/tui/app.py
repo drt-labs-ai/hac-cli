@@ -17,7 +17,6 @@ from hac_cli.domain.models import Environment, ScriptMeta
 from hac_cli.infrastructure.config_store import TomlConfigStore
 from hac_cli.infrastructure.hac_client import HacHttpClient
 from hac_cli.infrastructure.script_repository import FilesystemScriptRepository
-from hac_cli.infrastructure.secret_store import KeyringSecretStore
 
 _NO_ENV_MSG = "(none — run: hac env add)"
 
@@ -131,7 +130,6 @@ class HacApp(App[None]):
     def __init__(self) -> None:
         super().__init__()
         self._config_store = TomlConfigStore()
-        self._secret_store = KeyringSecretStore()
         self._script_repo = FilesystemScriptRepository()
         self._environments: list[Environment] = []
         self._all_scripts: list[ScriptMeta] = []
@@ -339,9 +337,8 @@ class HacApp(App[None]):
         log = self.query_one("#output-log", RichLog)
         try:
             service = ExecuteGroovyService(
-                hac_client=HacHttpClient(secret_store=self._secret_store),
+                hac_client=HacHttpClient(),
                 config_store=self._config_store,
-                secret_store=self._secret_store,
                 script_repo=self._script_repo,
             )
             result = await service.execute(

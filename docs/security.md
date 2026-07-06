@@ -2,19 +2,20 @@
 
 ## Credential Storage
 
-Passwords are stored exclusively in the **OS keychain** via the `keyring` library:
+Passwords are stored in **`config.toml`** at the project root alongside other environment
+configuration. This is intentional for a local developer productivity tool:
 
-| OS | Backend |
-|---|---|
-| macOS | macOS Keychain |
-| Windows | Windows Credential Manager |
-| Linux | libsecret / GNOME Keyring / KWallet |
+```toml
+[environments.dev]
+url      = "https://dev-hac.example.com"
+username = "admin"
+password = "yourpassword"
+timeout  = 30
+verify_ssl = true
+```
 
-The service name is `hac-cli` and the username is the environment name. Credentials
-are never written to disk in any other form.
-
-The TOML config at `~/.hac-cli/config.toml` contains only: URL, username, timeout,
-and SSL flag. **No passwords, no tokens, no cookies.**
+`config.toml` is listed in `.gitignore` and must never be committed. The pre-commit
+hook will block any attempt to stage it.
 
 ## Secret Scanning
 
@@ -42,6 +43,29 @@ This applies to all loggers obtained via `utils/logging.get_logger()`.
 - `--no-ssl-verify` is available only for development environments; it is visible
   in `hac env list` output as a red warning
 - HTTP/2 is used automatically when the server supports it (via httpx)
+
+## Safe Mode
+
+All environments have `safe_mode = true` by default. When safe mode is enabled, any execution
+with `commit=True` is blocked at the application layer (`ExecuteGroovyService.execute()`) before
+any HTTP request is made. This prevents accidental data modifications regardless of how the tool
+is invoked (CLI, TUI, or application layer directly).
+
+```toml
+# config.toml
+[environments.dev]
+safe_mode = true   # default — commit=True blocked
+```
+
+To allow commits on a specific environment (e.g. a dedicated write-capable env):
+
+```bash
+hac env add --name dev-write --url ... --user admin --password ... --no-safe-mode
+```
+
+`hac env list` shows `on` (green) or `off` (yellow) in the Safe Mode column.
+
+---
 
 ## CSRF Protection
 

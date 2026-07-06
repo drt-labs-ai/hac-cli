@@ -12,10 +12,10 @@ from rich.panel import Panel
 from rich.syntax import Syntax
 
 from hac_cli.application.execute_groovy import ExecuteGroovyService
+from hac_cli.domain.exceptions import CommitBlockedBySafeModeError
 from hac_cli.infrastructure.config_store import TomlConfigStore
 from hac_cli.infrastructure.hac_client import HacHttpClient
 from hac_cli.infrastructure.script_repository import FilesystemScriptRepository
-from hac_cli.infrastructure.secret_store import KeyringSecretStore
 
 groovy_app = typer.Typer(no_args_is_help=True, rich_markup_mode="rich")
 console = Console()
@@ -23,9 +23,8 @@ console = Console()
 
 def _make_service() -> ExecuteGroovyService:
     return ExecuteGroovyService(
-        hac_client=HacHttpClient(secret_store=KeyringSecretStore()),
+        hac_client=HacHttpClient(),
         config_store=TomlConfigStore(),
-        secret_store=KeyringSecretStore(),
         script_repo=FilesystemScriptRepository(),
     )
 
@@ -46,15 +45,19 @@ def run_script(
         raise typer.Exit(1)
 
     svc = _make_service()
-    result = asyncio.run(
-        svc.execute(
-            env_name=env,
-            file_path=file,
-            script_library_path=script,
-            inline_code=inline,
-            commit=commit,
+    try:
+        result = asyncio.run(
+            svc.execute(
+                env_name=env,
+                file_path=file,
+                script_library_path=script,
+                inline_code=inline,
+                commit=commit,
+            )
         )
-    )
+    except CommitBlockedBySafeModeError as exc:
+        console.print(f"[red]Blocked:[/red] {exc}")
+        raise typer.Exit(1)
 
     if output_only:
         typer.echo(result.output)
@@ -103,13 +106,17 @@ def exec_nlp(
 
     console.print(f"Running: [bold]{chosen.name}[/bold]")
 
-    result = asyncio.run(
-        svc.execute(
-            env_name=env,
-            script_library_path=chosen.path,
-            commit=commit,
+    try:
+        result = asyncio.run(
+            svc.execute(
+                env_name=env,
+                script_library_path=chosen.path,
+                commit=commit,
+            )
         )
-    )
+    except CommitBlockedBySafeModeError as exc:
+        console.print(f"[red]Blocked:[/red] {exc}")
+        raise typer.Exit(1)
 
     status_color = "green" if result.succeeded else "red"
     console.print(

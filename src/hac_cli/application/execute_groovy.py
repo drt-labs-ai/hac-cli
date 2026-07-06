@@ -5,9 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-from hac_cli.domain.exceptions import EnvironmentNotFoundError, MissingCredentialsError
+from hac_cli.domain.exceptions import (
+    CommitBlockedBySafeModeError,
+    EnvironmentNotFoundError,
+    MissingCredentialsError,
+)
 from hac_cli.domain.models import ExecutionContext, ExecutionResult, ScriptMeta
-from hac_cli.domain.ports import IConfigStore, IHacClient, IScriptRepository, ISecretStore
+from hac_cli.domain.ports import IConfigStore, IHacClient, IScriptRepository
 
 
 class ExecuteGroovyService:
@@ -15,12 +19,10 @@ class ExecuteGroovyService:
         self,
         hac_client: IHacClient,
         config_store: IConfigStore,
-        secret_store: ISecretStore,
         script_repo: IScriptRepository,
     ) -> None:
         self._client = hac_client
         self._config = config_store
-        self._secrets = secret_store
         self._scripts = script_repo
 
     async def execute(
@@ -35,8 +37,11 @@ class ExecuteGroovyService:
         if env is None:
             raise EnvironmentNotFoundError(env_name)
 
-        if self._secrets.get_password(env_name) is None:
+        if not env.password:
             raise MissingCredentialsError(env_name)
+
+        if commit and env.safe_mode:
+            raise CommitBlockedBySafeModeError(env_name)
 
         script_content = self._resolve_script(file_path, script_library_path, inline_code)
 

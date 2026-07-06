@@ -89,7 +89,7 @@ def _check_bash(command: str) -> None:
     if m:
         _block(
             f"Attempt to stage a file matching a secret pattern: '{m.group(1)}'\n"
-            "Passwords and tokens must be stored in the OS keychain via KeyringSecretStore."
+            "Passwords belong in config.toml (project root, gitignored) — never in a staged file."
         )
 
     if _DANGEROUS_RM_PATTERN.search(command):
@@ -104,7 +104,7 @@ def _check_write(file_path: str, content: str) -> None:
         if pattern.search(content):
             _warn(
                 f"Possible hardcoded credential pattern in {Path(file_path).name}\n"
-                "Store secrets with KeyringSecretStore, not in source files."
+                "Store secrets in config.toml (project root, gitignored) — not in source files."
             )
             break  # one warning is enough
 

@@ -12,7 +12,7 @@ import tomli_w
 from hac_cli.domain.models import Environment
 from hac_cli.domain.ports import IConfigStore
 
-_DEFAULT_CONFIG_FILE = Path.home() / ".hac-cli" / "config.toml"
+_DEFAULT_CONFIG_FILE = Path(__file__).parents[3] / "config.toml"
 
 
 def _resolve_config_path() -> Path:
@@ -51,12 +51,16 @@ class TomlConfigStore(IConfigStore):
 
     def save_environment(self, env: Environment) -> None:
         data = self._load()
-        data.setdefault("environments", {})[env.name] = {
+        entry: dict = {
             "url": env.url,
             "username": env.username,
             "timeout": env.timeout,
             "verify_ssl": env.verify_ssl,
         }
+        if env.password is not None:
+            entry["password"] = env.password
+        entry["safe_mode"] = env.safe_mode
+        data.setdefault("environments", {})[env.name] = entry
         self._save(data)
 
     def delete_environment(self, name: str) -> None:
@@ -70,6 +74,8 @@ class TomlConfigStore(IConfigStore):
             name=name,
             url=cfg["url"],
             username=cfg["username"],
+            password=cfg.get("password"),
             timeout=cfg.get("timeout", 30),
             verify_ssl=cfg.get("verify_ssl", True),
+            safe_mode=cfg.get("safe_mode", True),
         )

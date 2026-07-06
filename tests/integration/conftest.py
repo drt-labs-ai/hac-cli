@@ -4,7 +4,7 @@ All integration tests are automatically skipped when HAC_TEST_URL is not set.
 
 Required env vars:
   HAC_TEST_URL          Full HAC base URL, e.g. https://dev-hac.example.com
-  HAC_TEST_PASSWORD     Admin password (or HAC_TEST_PASSWORD for the env named "test")
+  HAC_TEST_PASSWORD     Admin password
 
 Optional env vars:
   HAC_TEST_USER         Admin username (default: admin)
@@ -18,7 +18,6 @@ import os
 import pytest
 
 from hac_cli.domain.models import Environment, ExecutionContext
-from hac_cli.infrastructure.env_secret_store import EnvSecretStore
 from hac_cli.infrastructure.hac_client import HacHttpClient
 
 
@@ -35,6 +34,7 @@ def hac_env() -> Environment:
         name="test",
         url=_require_hac_url(),
         username=os.getenv("HAC_TEST_USER", "admin"),
+        password=os.getenv("HAC_TEST_PASSWORD"),
         timeout=int(os.getenv("HAC_TEST_TIMEOUT", "60")),
         verify_ssl=os.getenv("HAC_TEST_VERIFY_SSL", "true").lower() != "false",
     )
@@ -42,7 +42,7 @@ def hac_env() -> Environment:
 
 @pytest.fixture(scope="session")
 def hac_client() -> HacHttpClient:
-    return HacHttpClient(secret_store=EnvSecretStore())
+    return HacHttpClient()
 
 
 @pytest.fixture

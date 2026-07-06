@@ -29,8 +29,9 @@ uv sync --extra dev
 hac env add \
   --name dev \
   --url https://dev-hac.example.com \
-  --user admin
-# Prompts for password — stored securely in OS keychain
+  --user admin \
+  --password yourpassword
+# Saved to config.toml in the project root (gitignored)
 ```
 
 ### 2. Test connectivity
@@ -55,23 +56,39 @@ hac groovy run --env dev --inline 'println "Hello from HAC!"'
 
 ## Configuration Reference
 
-Non-secret configuration lives at `~/.hac-cli/config.toml`:
+All configuration (including passwords) lives at `config.toml` in the project root:
 
 ```toml
 [environments.dev]
-url        = "https://dev-hac.example.com"
+url        = "https://dev-hac.example.com/hac/"
 username   = "admin"
-timeout    = 30          # seconds
+password   = "yourpassword"
+timeout    = 30
 verify_ssl = true
+safe_mode  = true   # blocks --commit; set false only when you need to persist changes
 
 [environments.staging]
-url        = "https://staging-hac.example.com"
+url        = "https://staging-hac.example.com/hac/"
 username   = "admin"
+password   = "yourpassword"
 timeout    = 60
 verify_ssl = true
+safe_mode  = true
 ```
 
-Passwords are **never** stored here — they go to the OS keychain automatically.
+The URL must include the HAC context path (typically `/hac/`). The trailing slash is optional —
+the tool strips it internally before appending paths, so there is no double-slash.
+
+### Safe mode
+
+All environments default to `safe_mode = true`, which blocks any execution with `--commit`.
+This prevents accidental data modifications. To allow commits on a specific environment:
+
+```bash
+hac env add --name dev --url ... --user admin --password ... --no-safe-mode
+```
+
+`hac env list` shows the current safe mode status for each environment.
 
 ## Common Workflows
 
@@ -145,7 +162,7 @@ Run `hac` with no arguments to launch the full terminal UI:
 | Key | Action |
 |---|---|
 | `↑↓` | Navigate scripts |
-| `F5` / `Enter` | Execute selected script |
+| `F5` | Execute selected script |
 | `/` | Focus search input |
 | `Esc` | Clear search |
 | `e` | Cycle to next environment |
@@ -156,7 +173,7 @@ Run `hac` with no arguments to launch the full terminal UI:
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `HAC_CONFIG_PATH` | `~/.hac-cli` | Override config directory |
+| `HAC_CONFIG_PATH` | project root | Override config directory |
 | `HAC_SCRIPTS_PATH` | `<install>/scripts` | Override script library root |
 | `HAC_LOG_LEVEL` | `WARNING` | Log level: DEBUG, INFO, WARNING |
 | `HAC_TEST_URL` | (unset) | Enable integration tests |

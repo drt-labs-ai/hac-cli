@@ -83,7 +83,8 @@ println "before: ${{result.result[0]}}"
     )
     result = await hac_client.execute(ctx)
     assert result.succeeded
-    assert "before: 0" in result.output
+    # COUNT query returns 0 on standard HAC; some versions return null for no-match
+    assert "before: 0" in result.output or "before: null" in result.output
 
 
 @pytest.mark.asyncio

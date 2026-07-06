@@ -3,8 +3,8 @@
 Auth flow per request:
   1. GET  /login                          → parse CSRF token for login form
   2. POST /j_spring_security_check        → follow_redirects=False; inspect redirect location
-  3. GET  /console/scripting/api/         → parse CSRF token for execute calls
-  4. POST /console/scripting/api/execute  → X-CSRF-TOKEN header; parse JSON response
+  3. GET  /console/scripting/          → parse CSRF token; extract execute URL from page HTML
+  4. POST /console/scripting/execute   → X-CSRF-TOKEN header; parse JSON response
 
 Sessions (cookie jars) are cached in memory with a 30-minute TTL. On expiry or a
 401/403 response, the client re-authenticates once before raising.
@@ -26,7 +26,7 @@ from hac_cli.domain.exceptions import (
     ScriptExecutionError,
 )
 from hac_cli.domain.models import Environment, ExecutionContext, ExecutionResult, ExecutionStatus
-from hac_cli.domain.ports import IHacClient, ISecretStore
+from hac_cli.domain.ports import IHacClient
 from hac_cli.utils.logging import get_logger
 
 _LOG = get_logger(__name__)
@@ -44,8 +44,7 @@ class _CachedSession:
 
 
 class HacHttpClient(IHacClient):
-    def __init__(self, secret_store: ISecretStore) -> None:
-        self._secrets = secret_store
+    def __init__(self) -> None:
         self._sessions: dict[str, _CachedSession] = {}
 
     async def execute(self, ctx: ExecutionContext) -> ExecutionResult:
@@ -57,21 +56,21 @@ class HacHttpClient(IHacClient):
                 await self._authenticate(client, env)
 
             try:
-                csrf = await self._fetch_csrf_token(client, env)
+                csrf, execute_url = await self._fetch_csrf_token(client, env)
             except HacAuthenticationError:
                 # Server-side session expired — re-authenticate once
                 self._invalidate_session(env.name)
                 await self._authenticate(client, env)
-                csrf = await self._fetch_csrf_token(client, env)
+                csrf, execute_url = await self._fetch_csrf_token(client, env)
 
             try:
-                result = await self._post_script(client, ctx, csrf)
+                result = await self._post_script(client, ctx, csrf, execute_url)
             except httpx.HTTPStatusError as exc:
                 if exc.response.status_code in (401, 403):
                     self._invalidate_session(env.name)
                     await self._authenticate(client, env)
-                    csrf = await self._fetch_csrf_token(client, env)
-                    result = await self._post_script(client, ctx, csrf)
+                    csrf, execute_url = await self._fetch_csrf_token(client, env)
+                    result = await self._post_script(client, ctx, csrf, execute_url)
                 else:
                     raise HacConnectionError(
                         env.hac_base_url, f"HTTP {exc.response.status_code}"
@@ -118,7 +117,7 @@ class HacHttpClient(IHacClient):
         self._sessions.pop(env_name, None)
 
     async def _authenticate(self, client: httpx.AsyncClient, env: Environment) -> None:
-        password = self._secrets.get_password(env.name)
+        password = env.password
         if not password:
             raise MissingCredentialsError(env.name)
 
@@ -151,7 +150,14 @@ class HacHttpClient(IHacClient):
         self._sessions[env.name] = _CachedSession(cookies=dict(client.cookies))
         _LOG.debug("Authentication successful for %s", env.name)
 
-    async def _fetch_csrf_token(self, client: httpx.AsyncClient, env: Environment) -> str:
+    async def _fetch_csrf_token(
+        self, client: httpx.AsyncClient, env: Environment
+    ) -> tuple[str, str]:
+        """Returns (csrf_token, execute_url).
+
+        execute_url is read from data-executorurl on the page when present (some SAP Commerce
+        instances expose a custom endpoint); falls back to env.execute_url if absent.
+        """
         try:
             resp = await client.get(env.scripting_url)
         except httpx.ConnectError as exc:
@@ -172,19 +178,23 @@ class HacHttpClient(IHacClient):
                 "Could not extract CSRF token from HAC scripting page. "
                 "Verify the URL points to a valid SAP Commerce HAC instance.",
             )
-        return csrf
+
+        execute_url = self._extract_execute_url_from_html(resp.text, env) or env.execute_url
+        return csrf, execute_url
 
     async def _post_script(
         self,
         client: httpx.AsyncClient,
         ctx: ExecutionContext,
         csrf_token: str,
+        execute_url: str,
     ) -> ExecutionResult:
         try:
             resp = await client.post(
-                ctx.environment.execute_url,
+                execute_url,
                 data={
                     "script": ctx.script_content,
+                    "scriptType": "groovy",
                     "commit": str(ctx.commit).lower(),
                 },
                 headers={
@@ -213,13 +223,19 @@ class HacHttpClient(IHacClient):
 
     @staticmethod
     def _parse_execution_response(payload: dict) -> ExecutionResult:
-        stacktrace_occurred: bool = payload.get("stacktraceOccurred", False)
+        # Standard format uses stacktraceOccurred (bool); custom endpoints use stacktraceText
+        stacktrace_occurred: bool = payload.get("stacktraceOccurred", False) or bool(
+            (payload.get("stacktraceText") or "").strip()
+        )
 
         if stacktrace_occurred:
             # outputText = stdout captured before the error
-            # executionResult = the stacktrace itself
+            # executionResult / stacktraceText = the stacktrace itself
             output = (payload.get("outputText") or "").strip()
-            stack_trace: Optional[str] = (payload.get("executionResult") or "").strip() or None
+            stack_trace: Optional[str] = (
+                (payload.get("executionResult") or payload.get("stacktraceText") or "").strip()
+                or None
+            )
         else:
             output = (
                 payload.get("outputText") or payload.get("executionResult") or ""
@@ -232,6 +248,29 @@ class HacHttpClient(IHacClient):
             execution_time_ms=0,
             stack_trace=stack_trace,
         )
+
+    @staticmethod
+    def _extract_execute_url_from_html(html: str, env: Environment) -> Optional[str]:
+        """Reads data-executorurl from the execute button; resolves relative URLs.
+
+        Prefers id="executeButton" over a generic data-executorurl search because
+        some HAC pages also have a saveButton with the same attribute.
+        """
+        from urllib.parse import urlparse
+
+        soup = BeautifulSoup(html, "lxml")
+
+        btn = soup.find(id="executeButton")
+        if not isinstance(btn, Tag):
+            return None
+
+        raw = str(btn.get("data-executorurl") or "")
+        if not raw:
+            return None
+        if raw.startswith("http"):
+            return raw
+        parsed = urlparse(env.url)
+        return f"{parsed.scheme}://{parsed.netloc}{raw}"
 
     @staticmethod
     def _extract_csrf_from_html(html: str) -> Optional[str]:

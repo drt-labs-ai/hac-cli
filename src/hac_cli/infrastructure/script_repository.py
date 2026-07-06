@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 from typing import Optional
@@ -11,14 +12,19 @@ from thefuzz import process as fuzzy_process
 from hac_cli.domain.models import ScriptMeta
 from hac_cli.domain.ports import IScriptRepository
 
-_SCRIPTS_ROOT = Path(__file__).parents[4] / "scripts"
+_DEFAULT_SCRIPTS_ROOT = Path(__file__).parents[4] / "scripts"
 _META_PATTERN = re.compile(r"^// @meta\s*(.*?)^// @end", re.DOTALL | re.MULTILINE)
 _FIELD_PATTERN = re.compile(r"^// (\w+):\s*(.+)$", re.MULTILINE)
 
 
+def _resolve_scripts_root() -> Path:
+    env_override = os.getenv("HAC_SCRIPTS_PATH")
+    return Path(env_override) if env_override else _DEFAULT_SCRIPTS_ROOT
+
+
 class FilesystemScriptRepository(IScriptRepository):
-    def __init__(self, scripts_root: Path = _SCRIPTS_ROOT) -> None:
-        self._root = scripts_root
+    def __init__(self, scripts_root: Optional[Path] = None) -> None:
+        self._root = scripts_root if scripts_root is not None else _resolve_scripts_root()
 
     def list_scripts(self, category: Optional[str] = None) -> list[ScriptMeta]:
         pattern = f"{category}/**/*.groovy" if category else "**/*.groovy"

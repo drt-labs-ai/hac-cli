@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import tomllib
 from pathlib import Path
 from typing import Optional
@@ -11,13 +12,19 @@ import tomli_w
 from hac_cli.domain.models import Environment
 from hac_cli.domain.ports import IConfigStore
 
-_CONFIG_DIR = Path.home() / ".hac-cli"
-_CONFIG_FILE = _CONFIG_DIR / "config.toml"
+_DEFAULT_CONFIG_FILE = Path.home() / ".hac-cli" / "config.toml"
+
+
+def _resolve_config_path() -> Path:
+    env_override = os.getenv("HAC_CONFIG_PATH")
+    if env_override:
+        return Path(env_override) / "config.toml"
+    return _DEFAULT_CONFIG_FILE
 
 
 class TomlConfigStore(IConfigStore):
-    def __init__(self, config_path: Path = _CONFIG_FILE) -> None:
-        self._path = config_path
+    def __init__(self, config_path: Optional[Path] = None) -> None:
+        self._path = config_path if config_path is not None else _resolve_config_path()
         self._path.parent.mkdir(parents=True, exist_ok=True)
 
     def _load(self) -> dict:

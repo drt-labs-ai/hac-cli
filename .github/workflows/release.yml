@@ -10,8 +10,42 @@ permissions:
   id-token: write
 
 jobs:
+  validate:
+    name: Pre-release Validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v3
+
+      - name: Set up Python
+        run: uv python install 3.11
+
+      - name: Install dev dependencies
+        run: uv sync --extra dev
+
+      - name: Lint
+        run: uv run ruff check src/ tests/
+
+      - name: Type check
+        run: uv run mypy src/
+
+      - name: Unit tests
+        run: uv run pytest tests/unit/ -v
+
+      - name: Verify tag matches pyproject.toml version
+        run: |
+          TAG=${GITHUB_REF_NAME#v}
+          PKG=$(grep '^version' pyproject.toml | head -1 | sed 's/.*= *"\(.*\)"/\1/')
+          if [ "$TAG" != "$PKG" ]; then
+            echo "ERROR: Tag $TAG does not match pyproject.toml version $PKG"
+            exit 1
+          fi
+          echo "✓ Version $TAG matches"
+
   build:
     name: Build Distribution
+    needs: validate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -20,6 +54,11 @@ jobs:
 
       - name: Build package
         run: uv build
+
+      - name: Verify package
+        run: |
+          pip install twine --quiet
+          twine check dist/*
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -57,8 +96,20 @@ jobs:
           name: dist
           path: dist/
 
+      - name: Extract release notes from CHANGELOG
+        id: changelog
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          NOTES=$(awk "/^## \[$VERSION\]/{found=1; next} found && /^## \[/{exit} found{print}" CHANGELOG.md)
+          if [ -z "$NOTES" ]; then
+            NOTES="See [CHANGELOG.md](CHANGELOG.md) for details."
+          fi
+          # Write to a file to preserve newlines through GITHUB_OUTPUT
+          echo "$NOTES" > /tmp/release_notes.md
+          echo "notes_file=/tmp/release_notes.md" >> "$GITHUB_OUTPUT"
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*
-          generate_release_notes: true
+          body_path: ${{ steps.changelog.outputs.notes_file }}

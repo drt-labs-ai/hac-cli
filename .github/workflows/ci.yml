@@ -59,6 +59,31 @@ jobs:
         with:
           file: ./coverage.xml
 
+  build:
+    name: Build Package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v3
+
+      - name: Set up Python
+        run: uv python install 3.11
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Build wheel and sdist
+        run: uv build
+
+      - name: Verify package metadata
+        run: |
+          pip install twine --quiet
+          twine check dist/*
+
+      - name: Verify wheel installs cleanly
+        run: pip install dist/*.whl --dry-run --quiet
+
   secrets-scan:
     name: Secret Scanning
     runs-on: ubuntu-latest
@@ -72,3 +97,28 @@ jobs:
           pip install detect-secrets
           detect-secrets scan --baseline .secrets.baseline
           detect-secrets audit .secrets.baseline
+
+  integration:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    # Only run when the HAC_TEST_URL secret is configured (opt-in via environment)
+    if: vars.RUN_INTEGRATION_TESTS == 'true'
+    environment: integration
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v3
+
+      - name: Set up Python
+        run: uv python install 3.11
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Run integration tests
+        run: uv run pytest tests/integration/ -v --no-cov -m integration
+        env:
+          HAC_TEST_URL: ${{ secrets.HAC_TEST_URL }}
+          HAC_TEST_PASSWORD: ${{ secrets.HAC_TEST_PASSWORD }}
+          HAC_TEST_USER: ${{ vars.HAC_TEST_USER || 'admin' }}
+          HAC_TEST_VERIFY_SSL: ${{ vars.HAC_TEST_VERIFY_SSL || 'true' }}

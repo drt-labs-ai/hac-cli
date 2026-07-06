@@ -82,9 +82,13 @@ files = ["src"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests/unit"]
 asyncio_mode = "auto"
 addopts = "-v --cov=src/hac_cli --cov-report=term-missing --cov-fail-under=80"
+markers = [
+    "integration: marks tests requiring a live HAC instance (deselect with '-m not integration')",
+    "slow: marks tests as slow-running",
+]
 
 [tool.coverage.run]
 source = ["src/hac_cli"]

@@ -1,0 +1,24 @@
+# Ensure consistent line endings
+* text=auto eol=lf
+
+# Force binary treatment
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+
+# Python
+*.py text eol=lf
+*.groovy text eol=lf
+*.toml text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.md text eol=lf
+*.sh text eol=lf
+
+# Shell scripts — should never be CRLF
+*.sh eol=lf

@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(chmod +x /Users/raviteja.dulla/claude-workplace/sap-commerce/.claude/hooks/pre-tool-call.sh)",
+      "Bash(chmod +x /Users/raviteja.dulla/claude-workplace/sap-commerce/.claude/hooks/post-tool-call.sh)",
+      "Bash(git init *)"
+    ]
+  }
+}

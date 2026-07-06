@@ -1,0 +1,88 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Testing
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Distribution
+*.tar.gz
+*.whl
+
+# Secrets — NEVER COMMIT
+*.key
+*.pem
+*.p12
+*.pfx
+*.crt
+*.cer
+secrets.toml
+secrets.yaml
+secrets.json
+*.secret
+*credentials*
+*password*
+cookies.txt
+*.cookie
+.env.*
+config.local.*
+local.toml
+local.yaml
+
+# HAC session artifacts
+.hac_sessions/
+.hac_tokens/
+
+# Logs
+*.log
+logs/
+*.log.*
+
+# OS
+Thumbs.db
+ehthumbs.db
+Desktop.ini

@@ -1,0 +1,19 @@
+// @meta
+// name: Script Display Name
+// description: One-line description of what this script does
+// category: <cache|catalog|customer|orders|misc>
+// tags: [tag1, tag2]
+// params: [param1, param2]
+// @end
+
+// Declare parameters with defaults (use binding.hasVariable for safety)
+def param1 = binding.hasVariable("param1") ? param1 : "default_value"
+
+// Get Spring beans via Registry
+import de.hybris.platform.core.Registry
+// import YourService
+
+// def myService = Registry.getApplicationContext().getBean(YourService.class)
+
+// Script logic
+println "Script executed with param1=${param1}"

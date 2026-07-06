@@ -36,6 +36,10 @@ class Environment:
         return f"{self.hac_base_url}/console/scripting/api/"
 
     @property
+    def login_page_url(self) -> str:
+        return f"{self.hac_base_url}/login"
+
+    @property
     def execute_url(self) -> str:
         return f"{self.hac_base_url}/console/scripting/api/execute"
 

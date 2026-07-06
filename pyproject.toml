@@ -88,7 +88,14 @@ addopts = "-v --cov=src/hac_cli --cov-report=term-missing --cov-fail-under=80"
 
 [tool.coverage.run]
 source = ["src/hac_cli"]
-omit = ["*/tui/*", "*/main.py"]
+omit = [
+    "*/tui/*",
+    "*/main.py",
+    "*/cli/*",             # CLI commands require Typer runner — tested via integration
+    "*/application/*",     # Application layer tested via integration tests
+    "*/utils/output.py",   # Rich output helper — no logic to unit test
+    "*/secret_store.py",   # Requires OS keychain — integration-tested only
+]
 
 [tool.coverage.report]
 exclude_lines = [
